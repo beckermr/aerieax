@@ -1,0 +1,11 @@
+name: aerieax
+channels:
+  - conda-forge
+dependencies:
+  - jax
+  - numpy
+  - jax-tqdm
+  - pip
+  - setuptools
+  - setuptools_scm>=8
+  - pytest
