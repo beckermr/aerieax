@@ -211,14 +211,14 @@ def ensemble_hmc(
 
     if params_init is None:
         rng_key, init_key = jrng.split(rng_key)
-        params_init = jrng.normal(rng_key, shape=(n_walkers, n_dims))
+        params_init = jrng.normal(init_key, shape=(n_walkers, n_dims))
     else:
         assert n_dims == params_init.shape[1], (
             "The number of dimensions given by `n_dims` must match the number of "
             "dimensions implied by `params_init`. You passed `n_dims`={n_dims} and "
             f"`params_init.shape[1]={params_init.shape[1]}."
         )
-        assert n_walkers == params_init.shape[1], (
+        assert n_walkers == params_init.shape[0], (
             "The number of walkers given by `n_walkers` must match the number of "
             "walkers implied by `params_init`. We have `n_walkers`={n_walkers} and "
             f"`params_init.shape[0]={params_init.shape[0]}."
