@@ -1,0 +1,35 @@
+[build-system]
+requires = [
+  "setuptools",
+  "setuptools_scm>=8",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aerieax"
+authors = [
+    {name = "Matthew R. Becker", email = "becker.mr@gmail.com"},
+]
+description = "Affine Invariant HMC and Nested Sampling in JAX"
+dynamic = ["version"]
+license = {file = "LICENSE"}
+readme = "README.md"
+dependencies = [
+  "jax",
+  "numpy",
+  "jax-tqdm",
+]
+
+[project.urls]
+home = "https://github.com/beckermr/aerieax"
+
+[tool.setuptools]
+packages = {find = {exclude=["tests*"]}}
+
+[tool.setuptools_scm]
+write_to = "aerieax/_version.py"
+write_to_template = "__version__ = '{version}'\n"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+preview = true
