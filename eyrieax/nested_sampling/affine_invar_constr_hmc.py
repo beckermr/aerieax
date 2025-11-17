@@ -76,7 +76,7 @@ def _leapfrog_base(log_like, x, p, B, n, h, constraint):
         x,
     )
 
-    return x, p, -vi, -vf
+    return x, p, vi, vf
 
 
 _leapfrog = jax.jit(
@@ -112,7 +112,7 @@ def _walk_step(
 
     x_new = []
     acc_new = []
-    nll_new = []
+    ll_new = []
 
     for s in range(2):
         # draw p
@@ -133,11 +133,14 @@ def _walk_step(
         B = B.T
 
         # do _leapfrog
-        x_pr, p_pr, v, v_pr = _leapfrog(log_like, x, p, B, n_steps, h, constraint)
+        x_pr, p_pr, nv, nv_pr = _leapfrog(log_like, x, p, B, n_steps, h, constraint)
 
         # measure q = exp(-V(xn) - 0.5 * pn * pn + V(x) + 0.5 * p *p)
         logq = (
-            v + 0.5 * jnp.sum(p * p, axis=1) - v_pr - 0.5 * jnp.sum(p_pr * p_pr, axis=1)
+            -nv
+            + 0.5 * jnp.sum(p * p, axis=1)
+            + nv_pr
+            - 0.5 * jnp.sum(p_pr * p_pr, axis=1)
         )
         q = jnp.exp(logq)
         q = jnp.clip(q, min=0, max=1)
@@ -150,16 +153,16 @@ def _walk_step(
         acc_val = r <= q
         x_new.append(jnp.where(acc_val.reshape(n_walkers_2, 1), x_pr, x))
         acc_new.append(q)
-        nll_new.append(jnp.where(acc_val, v_pr, v))
+        ll_new.append(jnp.where(acc_val, nv_pr, nv))
 
     x_new = jnp.concatenate(x_new)
     acc_new = jnp.concatenate(acc_new)
-    nll_new = jnp.concatenate(nll_new)
+    ll_new = jnp.concatenate(ll_new)
 
     return (
         x_new,
         rng_key,
-    ), (x_new, acc_new, nll_new)
+    ), (x_new, acc_new, ll_new)
 
 
 def _ensemble_hmc_with_constraint(
@@ -194,9 +197,9 @@ def _ensemble_hmc_with_constraint(
             n_samples, tqdm_type="std", ncols=80, desc="sampling"
         )(_local_walk_step)
 
-    _, (chain, acc, nloglike) = jax.lax.scan(
+    _, (chain, acc, loglike) = jax.lax.scan(
         _local_walk_step, (x_init, rng_key), xs=jnp.arange(n_samples)
     )
     if verbose:
         print("acceptance rate: %0.2f%%" % (100.0 * acc.mean()))
-    return chain, acc, nloglike
+    return chain, acc, loglike
