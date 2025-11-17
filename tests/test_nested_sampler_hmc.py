@@ -134,3 +134,48 @@ def test_nested_sampler_hmc_gauss_stats():
         rtol=0.1,
         atol=0,
     )
+
+
+@pytest.mark.parametrize("n_dims", [1, 2])
+@pytest.mark.parametrize("mu", [0, -0.5, 2.0])
+@pytest.mark.parametrize(
+    "xmin,xmax",
+    [
+        (-2, 3),
+        (-4, 4),
+    ],
+)
+def test_nested_sampler_hmc_gauss_evidence_transform(n_dims, mu, xmin, xmax):
+    def _log_like(x, sigma=1):
+        return -jnp.sum(
+            0.5 * (x - mu) ** 2 / sigma**2
+            + jnp.log(sigma)
+            + 0.5 * jnp.log(2.0 * jnp.pi)
+        )
+
+    def _log_prior(x):
+        return -n_dims * jnp.log(xmax - xmin)
+
+    def _prior_draw(rng_key):
+        return jrng.uniform(rng_key, shape=(n_dims,), minval=xmin, maxval=xmax)
+
+    true_logZ = n_dims * np.log(
+        (sp.stats.norm.cdf(xmax - mu) - sp.stats.norm.cdf(xmin - mu)) / (xmax - xmin)
+    )
+
+    rng_key = jrng.PRNGKey(seed=21)
+    n_live = 100
+
+    (logZ, delta_logZ, samps, logw, loglike, ns_data) = nested_sampler_hmc(
+        rng_key,
+        _log_like,
+        _log_prior,
+        _prior_draw,
+        n_dims,
+        n_live,
+        prior_domain=jnp.array([[xmin, xmax]] * n_dims),
+        verbose=False,
+    )
+
+    print("logZ|err|true:", logZ, delta_logZ, true_logZ)
+    assert np.abs(logZ - true_logZ) < 3.0 * delta_logZ

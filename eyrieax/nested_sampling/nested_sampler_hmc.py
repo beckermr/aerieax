@@ -8,6 +8,7 @@ import jax.numpy
 import jax.numpy as jnp
 import jax.scipy as jsp
 import jax.random as jrng
+import jax.nn as jnn
 import numpy as np
 
 from .affine_invar_constr_hmc import _ensemble_hmc_with_constraint
@@ -249,23 +250,67 @@ def _prior_domain_transforms(prior_domain, log_likelihood, log_prior):
 
     if prior_domain is None:
         # identity transform
-
         def _transform(x):
             return x
 
         def _inv_transform(x):
             return x
 
-        def _log_likelihood(x):
-            return log_likelihood(x)
-
-        def _log_prior(x):
-            return log_prior(x)
-
+        _log_likelihood = log_likelihood
+        _log_prior = log_prior
     else:
-        assert False
 
-    return _log_likelihood, _log_prior, _transform, _inv_transform
+        def _transform(x):
+            tx = []
+            for i in range(prior_domain.shape[0]):
+                xmin, xmax = prior_domain[i, :]
+                tx.append(
+                    jax.lax.cond(
+                        jnp.isfinite(xmin) & jnp.isfinite(xmax),
+                        lambda v: (xmax - xmin) * jnn.sigmoid(v) + xmin,
+                        lambda v: v,
+                        x[i],
+                    )
+                )
+            return jnp.array(tx)
+
+        def _inv_transform(x):
+            tx = []
+            for i in range(prior_domain.shape[0]):
+                xmin, xmax = prior_domain[i, :]
+                tx.append(
+                    jax.lax.cond(
+                        jnp.isfinite(xmin) & jnp.isfinite(xmax),
+                        lambda v: jsp.special.logit((v - xmin) / (xmax - xmin)),
+                        lambda v: v,
+                        x[i],
+                    )
+                )
+            return jnp.array(tx)
+
+        @jax.jit
+        def _log_prior(x):
+            val = log_prior(_transform(x))
+            for i in range(prior_domain.shape[0]):
+                xmin, xmax = prior_domain[i, :]
+                val += jax.lax.cond(
+                    jnp.isfinite(xmin) & jnp.isfinite(xmax),
+                    lambda v: jnp.log(xmax - xmin) + (2 * jnn.log_sigmoid(v) - v),
+                    lambda v: 0.0,
+                    x[i],
+                )
+            return val
+
+        @jax.jit
+        def _log_likelihood(x):
+            return log_likelihood(_transform(x))
+
+    return (
+        _log_likelihood,
+        _log_prior,
+        jax.jit(jax.vmap(_transform)),
+        jax.jit(jax.vmap(_inv_transform)),
+    )
 
 
 def nested_sampler_hmc(
@@ -502,7 +547,7 @@ def nested_sampler_hmc(
     new_keys = jrng.split(rng_key, num=n_live + 1)
     rng_key = new_keys[0]
     theta_keys = new_keys[1:]
-    theta = jax.vmap(_inv_transform)(jax.vmap(prior_draw)(theta_keys))
+    theta = _inv_transform(jax.vmap(prior_draw)(theta_keys))
     _live_points = NSPointSet(
         theta=theta,
         loglike=jax.vmap(_log_likelihood)(theta),
@@ -587,7 +632,7 @@ def nested_sampler_hmc(
         _accumulate_correction, ns_data, xs=jnp.arange(ns_data.n_live)
     )
 
-    samples = ns_data.sample_points.theta
+    samples = _transform(ns_data.sample_points.theta)
     log_like = ns_data.sample_points.loglike
     log_weights = ns_data.sample_points.logwlike
     log_weights = log_weights - jsp.special.logsumexp(log_weights)
