@@ -9,7 +9,7 @@ import jax.scipy as jsp
 import jax.random as jrng
 
 
-from affine_invar_constr_hmc import ensemble_hmc_with_constraint
+from .affine_invar_constr_hmc import _ensemble_hmc_with_constraint
 
 
 class NSPointSet(NamedTuple):
@@ -188,7 +188,7 @@ def _constrained_sampler(
     live_points_theta = live_points_theta[draw_index, :]
 
     sampler_key, hmc_key = jrng.split(sampler_key)
-    chain, _, _ = ensemble_hmc_with_constraint(
+    chain, _, _ = _ensemble_hmc_with_constraint(
         _neg_log_like,
         live_points_theta,
         n_samples_hmc,
