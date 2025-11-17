@@ -1,3 +1,5 @@
+import math
+
 import jax.numpy as jnp
 import jax.random as jrng
 import jax.nn as jnn
@@ -8,6 +10,7 @@ import scipy as sp
 import pytest
 
 from ornax.nested_sampling import nested_sampler_hmc
+from ornax.nested_sampling.nested_sampler_hmc import _2d_array_to_nested_tuples
 
 
 @pytest.mark.parametrize("n_dims", [1, 2])
@@ -179,3 +182,16 @@ def test_nested_sampler_hmc_gauss_evidence_transform(n_dims, mu, xmin, xmax):
 
     print("logZ|err|true:", logZ, delta_logZ, true_logZ)
     assert np.abs(logZ - true_logZ) < 3.0 * delta_logZ
+
+
+@pytest.mark.parametrize("vals,tvals", [
+    (((np.inf,),), ((math.inf,),)),
+    (((jnp.inf,),), ((math.inf,),)),
+    (((-np.inf, -jnp.inf),), ((-math.inf, -math.inf),)),
+    (((-2, 5), (-np.inf, -jnp.inf),), ((-2, 5), (-math.inf, -math.inf),)),
+])
+@pytest.mark.parametrize("as_array", [True, False])
+def test_nested_sampler_hmc_2d_array_to_nested_tuples(vals, tvals, as_array):
+    if as_array:
+        vals = jnp.array(vals)
+    assert _2d_array_to_nested_tuples(vals) == tvals
