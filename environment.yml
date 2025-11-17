@@ -1,4 +1,4 @@
-name: eyrieax
+name: ornax
 channels:
   - conda-forge
 dependencies:

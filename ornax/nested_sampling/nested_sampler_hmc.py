@@ -1,6 +1,6 @@
 import contextlib
 import functools
-import tqdm
+import math
 from typing import NamedTuple
 
 import jax
@@ -10,6 +10,7 @@ import jax.scipy as jsp
 import jax.random as jrng
 import jax.nn as jnn
 import numpy as np
+import tqdm
 
 from .affine_invar_constr_hmc import _ensemble_hmc_with_constraint
 
@@ -244,12 +245,22 @@ def _min_two(arr):
     return jax.lax.scan(_min_op, (m1, m2), xs=jnp.arange(arr.shape[0]))[0]
 
 
+def _2d_array_to_nested_tuples(arr):
+    return tuple(
+        tuple(float(a) for a in aval)
+        for aval in arr
+    )
+
+
 def _prior_domain_transforms(prior_domain, log_likelihood, log_prior):
     # _transform maps from (-inf, inf) -> prior_domain
     # _inv_transform is the inverse of _transform
 
-    if prior_domain is None:
-        # identity transform
+    if prior_domain is None or (
+        all(pd[0] == -math.inf for pd in prior_domain)
+        and all(pd[0] == math.inf for pd in prior_domain)
+    ):
+        # identity transform since None or the real-line
         def _transform(x):
             return x
 
@@ -258,47 +269,61 @@ def _prior_domain_transforms(prior_domain, log_likelihood, log_prior):
 
         _log_likelihood = log_likelihood
         _log_prior = log_prior
-    else:
+    elif np.all(np.isfinite(prior_domain)):
+        # all finite so we can vectorize
+        def _transform(x):
+            xmin = jnp.array([pd[0] for pd in prior_domain])
+            xmax = jnp.array([pd[1] for pd in prior_domain])
+            return (xmax - xmin) * jnn.sigmoid(x) + xmin
 
+        def _inv_transform(x):
+            xmin = jnp.array([pd[0] for pd in prior_domain])
+            xmax = jnp.array([pd[1] for pd in prior_domain])
+            return jsp.special.logit((x - xmin) / (xmax - xmin))
+
+        @jax.jit
+        def _log_prior(x):
+            xmin = jnp.array([pd[0] for pd in prior_domain])
+            xmax = jnp.array([pd[1] for pd in prior_domain])
+            return log_prior(_transform(x)) + jnp.sum(
+                jnp.log(xmax - xmin) + (2 * jnn.log_sigmoid(x) - x),
+            )
+
+        @jax.jit
+        def _log_likelihood(x):
+            return log_likelihood(_transform(x))
+    else:
+        # mix of finite and real-line so need a loop
         def _transform(x):
             tx = []
-            for i in range(prior_domain.shape[0]):
-                xmin, xmax = prior_domain[i, :]
-                tx.append(
-                    jax.lax.cond(
-                        jnp.isfinite(xmin) & jnp.isfinite(xmax),
-                        lambda v: (xmax - xmin) * jnn.sigmoid(v) + xmin,
-                        lambda v: v,
-                        x[i],
-                    )
-                )
+            for i in range(len(prior_domain)):
+                xmin, xmax = prior_domain[i]
+                if math.isfinite(xmin) and math.isfinite(xmax):
+                    tx.append((xmax - xmin) * jnn.sigmoid(x[i]) + xmin)
+                else:
+                    tx.append(x[i])
             return jnp.array(tx)
 
         def _inv_transform(x):
             tx = []
-            for i in range(prior_domain.shape[0]):
-                xmin, xmax = prior_domain[i, :]
-                tx.append(
-                    jax.lax.cond(
-                        jnp.isfinite(xmin) & jnp.isfinite(xmax),
-                        lambda v: jsp.special.logit((v - xmin) / (xmax - xmin)),
-                        lambda v: v,
-                        x[i],
-                    )
-                )
+            for i in range(len(prior_domain)):
+                xmin, xmax = prior_domain[i]
+            tx = []
+            for i in range(len(prior_domain)):
+                xmin, xmax = prior_domain[i]
+                if math.isfinite(xmin) and math.isfinite(xmax):
+                    tx.append(jsp.special.logit((x - xmin) / (xmax - xmin)))
+                else:
+                    tx.append(x[i])
             return jnp.array(tx)
 
         @jax.jit
         def _log_prior(x):
             val = log_prior(_transform(x))
-            for i in range(prior_domain.shape[0]):
-                xmin, xmax = prior_domain[i, :]
-                val += jax.lax.cond(
-                    jnp.isfinite(xmin) & jnp.isfinite(xmax),
-                    lambda v: jnp.log(xmax - xmin) + (2 * jnn.log_sigmoid(v) - v),
-                    lambda v: 0.0,
-                    x[i],
-                )
+            for i in range(len(prior_domain)):
+                xmin, xmax = prior_domain[i]
+                if math.isfinite(xmin) and math.isfinite(xmax):
+                    val += jnp.log(xmax - xmin) + (2 * jnn.log_sigmoid(x[i]) - x[i])
             return val
 
         @jax.jit
@@ -349,8 +374,8 @@ def nested_sampler_hmc(
         The number of dimensions.
     n_live : int
         The number of live points.
-    prior_domain : jax.numpy.ndarray, optional
-        An array of shape (n_dims, 2) giving the domain of the prior. If not
+    prior_domain : array-like, optional
+        An array-like object of shape (n_dims, 2) giving the domain of the prior. If not
         given, the prior is assumed to extend from `(-jnp.inf, jnp.inf)` in
         each dimension. If a finite range is given, the domain is automatically
         reparameterized to `(-jnp.inf, jnp.inf)` for sampling, but all input
@@ -413,7 +438,7 @@ def nested_sampler_hmc(
     )
 
     _log_likelihood, _log_prior, _transform, _inv_transform = _prior_domain_transforms(
-        prior_domain, log_likelihood, log_prior
+        _2d_array_to_nested_tuples(prior_domain), log_likelihood, log_prior
     )
 
     def _nested_sampling_itr(carry, itr):
