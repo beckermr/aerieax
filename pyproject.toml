@@ -11,6 +11,7 @@ authors = [
     {name = "Matthew R. Becker", email = "becker.mr@gmail.com"},
 ]
 description = "Affine Invariant HMC and Nested Sampling in JAX"
+requires-python = ">=3.11"
 dynamic = ["version"]
 license = {file = "LICENSE"}
 readme = "README.md"
