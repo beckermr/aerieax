@@ -54,7 +54,7 @@ def _leapfrog_base(log_like, x, p, B, n, h, scalar):
     )
     vf = jax.lax.cond(
         has_nans,
-        lambda _x: jnp.inf,
+        lambda _x: -jnp.inf,
         lambda _x: _x,
         vf,
     )

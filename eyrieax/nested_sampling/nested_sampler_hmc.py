@@ -175,9 +175,6 @@ def _constrained_sampler(
     def _constraint(x):
         return jnp.exp(log_likelihood(x) - dead_loglike) - 1.0
 
-    def _neg_log_like(x):
-        return -1.0 * log_prior(x)
-
     sampler_key, draw_key = jrng.split(sampler_key)
     draw_index = jrng.choice(draw_key, n_live)
     live_points_theta = live_points_theta.at[dead_index, :].set(
@@ -190,7 +187,7 @@ def _constrained_sampler(
 
     sampler_key, hmc_key = jrng.split(sampler_key)
     chain, _, _ = _ensemble_hmc_with_constraint(
-        _neg_log_like,
+        log_prior,
         live_points_theta,
         n_samples_hmc,
         n_dims,
@@ -263,7 +260,7 @@ def _prior_domain_transforms(prior_domain, log_likelihood, log_prior):
             return log_likelihood(x)
 
         def _log_prior(x):
-            return log_prior
+            return log_prior(x)
 
     else:
         assert False
