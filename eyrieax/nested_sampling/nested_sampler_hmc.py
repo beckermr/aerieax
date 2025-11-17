@@ -246,6 +246,31 @@ def _min_two(arr):
     return jax.lax.scan(_min_op, (m1, m2), xs=jnp.arange(arr.shape[0]))[0]
 
 
+def _prior_domain_transforms(prior_domain, log_likelihood, log_prior):
+    # _transform maps from (-inf, inf) -> prior_domain
+    # _inv_transform is the inverse of _transform
+
+    if prior_domain is None:
+        # identity transform
+
+        def _transform(x):
+            return x
+
+        def _inv_transform(x):
+            return x
+
+        def _log_likelihood(x):
+            return log_likelihood(x)
+
+        def _log_prior(x):
+            return log_prior
+
+    else:
+        assert False
+
+    return _log_likelihood, _log_prior, _transform, _inv_transform
+
+
 def nested_sampler_hmc(
     rng_key,
     log_likelihood,
@@ -253,6 +278,7 @@ def nested_sampler_hmc(
     prior_draw,
     n_dims,
     n_live,
+    prior_domain=None,
     n_iter_max=None,
     n_iter_conv_fac=10,
     n_walkers_hmc=None,
@@ -281,6 +307,12 @@ def nested_sampler_hmc(
         The number of dimensions.
     n_live : int
         The number of live points.
+    prior_domain : jax.numpy.ndarray, optional
+        An array of shape (n_dims, 2) giving the domain of the prior. If not
+        given, the prior is assumed to extend from `(-jnp.inf, jnp.inf)` in
+        each dimension. If a finite range is given, the domain is automatically
+        reparameterized to `(-jnp.inf, jnp.inf)` for sampling, but all input
+        functions and returned samples are in the original, finite-range domain.
     n_iter_max : int, optional
         The maximum number of iterations. Default is `10 * n_live`.
     n_iter_conv_fac : float, optional
@@ -338,6 +370,10 @@ def nested_sampler_hmc(
         f"You sent n_walkers_hmc={n_walkers_hmc}, n_dims={n_dims}, n_live={n_live}."
     )
 
+    _log_likelihood, _log_prior, _transform, _inv_transform = _prior_domain_transforms(
+        prior_domain, log_likelihood, log_prior
+    )
+
     def _nested_sampling_itr(carry, itr):
         ns_data = carry
 
@@ -377,8 +413,8 @@ def nested_sampler_hmc(
             n_live,
             dead_index,
             dead_loglike,
-            log_likelihood,
-            log_prior,
+            _log_likelihood,
+            _log_prior,
             n_dims,
             n_walkers_hmc,
             n_samples_hmc,
@@ -388,7 +424,7 @@ def nested_sampler_hmc(
         live_points = NSPointSet(
             theta=ns_data.live_points.theta.at[dead_index, :].set(new_point),
             loglike=ns_data.live_points.loglike.at[dead_index].set(
-                log_likelihood(new_point)
+                _log_likelihood(new_point)
             ),
             logwlike=None,
         )
@@ -469,10 +505,10 @@ def nested_sampler_hmc(
     new_keys = jrng.split(rng_key, num=n_live + 1)
     rng_key = new_keys[0]
     theta_keys = new_keys[1:]
-    theta = jax.vmap(prior_draw)(theta_keys)
+    theta = jax.vmap(_inv_transform)(jax.vmap(prior_draw)(theta_keys))
     _live_points = NSPointSet(
         theta=theta,
-        loglike=jax.vmap(log_likelihood)(theta),
+        loglike=jax.vmap(_log_likelihood)(theta),
         logwlike=None,
     )
     _sorted_inds = jnp.argsort(_live_points.loglike)[0:2]
