@@ -23,7 +23,7 @@ def _leapfrog_base(log_like, x, p, B, n, h, scalar):
     vgfunc = jax.value_and_grad(log_like)
 
     # first half kick
-    vi, g = vgfunc(x)
+    nvi, g = vgfunc(x)
     p = p - h / 2.0 * jnp.dot(B.T, -g)
 
     # n - 1 full drft + kick
@@ -40,7 +40,7 @@ def _leapfrog_base(log_like, x, p, B, n, h, scalar):
         x = x + h * B * p
     else:
         x = x + h * jnp.dot(B, p)
-    vf, g = vgfunc(x)
+    nvf, g = vgfunc(x)
     p = p - h / 2 * jnp.dot(B.T, -g)
 
     # reverse p
@@ -49,14 +49,14 @@ def _leapfrog_base(log_like, x, p, B, n, h, scalar):
     has_nans = (
         jnp.any(jnp.isnan(p))
         | jnp.any(jnp.isnan(p))
-        | jnp.any(jnp.isnan(vi))
-        | jnp.any(jnp.isnan(vf))
+        | jnp.any(jnp.isnan(nvi))
+        | jnp.any(jnp.isnan(nvf))
     )
-    vf = jax.lax.cond(
+    nvf = jax.lax.cond(
         has_nans,
         lambda _x: -jnp.inf,
         lambda _x: _x,
-        vf,
+        nvf,
     )
     p = jax.lax.cond(
         has_nans,
@@ -65,7 +65,7 @@ def _leapfrog_base(log_like, x, p, B, n, h, scalar):
         p,
     )
 
-    return x, p, vi, vf
+    return x, p, nvi, nvf
 
 
 @functools.partial(

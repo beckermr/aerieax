@@ -36,7 +36,7 @@ def _leapfrog_base(log_like, x, p, B, n, h, constraint):
         return _x, _p
 
     # first half kick
-    vi, g = vgfunc(x)
+    nvi, g = vgfunc(x)
     p = p - h / 2.0 * jnp.dot(B.T, -g)
 
     # n - 1 full drft + kick
@@ -53,7 +53,7 @@ def _leapfrog_base(log_like, x, p, B, n, h, constraint):
 
     # full drift, half kick
     x = x + h * jnp.dot(B, p)
-    vf, g = vgfunc(x)
+    nvf, g = vgfunc(x)
     p = p - h / 2 * jnp.dot(B.T, -g)
 
     # reverse p
@@ -62,21 +62,21 @@ def _leapfrog_base(log_like, x, p, B, n, h, constraint):
     has_nans_or_bad_constr = (
         jnp.any(jnp.isnan(p))
         | jnp.any(jnp.isnan(p))
-        | jnp.any(jnp.isnan(vi))
-        | jnp.any(jnp.isnan(vf))
+        | jnp.any(jnp.isnan(nvi))
+        | jnp.any(jnp.isnan(nvf))
         | jnp.any(jnp.isnan(x))
         | jnp.any(constraint(x) < 0)
     )
-    vf, p, x = jax.lax.cond(
+    nvf, p, x = jax.lax.cond(
         has_nans_or_bad_constr,
-        lambda _vf, _p, _x: (-jnp.inf, jnp.zeros_like(_p), jnp.zeros_like(_x)),
-        lambda _vf, _p, _x: (_vf, _p, _x),
-        vf,
+        lambda _nvf, _p, _x: (-jnp.inf, jnp.zeros_like(_p), jnp.zeros_like(_x)),
+        lambda _nvf, _p, _x: (_nvf, _p, _x),
+        nvf,
         p,
         x,
     )
 
-    return x, p, vi, vf
+    return x, p, nvi, nvf
 
 
 _leapfrog = jax.jit(
