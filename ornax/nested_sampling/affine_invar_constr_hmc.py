@@ -8,7 +8,7 @@ import numpy as np
 from jax_tqdm import scan_tqdm
 
 
-def _leapfrog_base(neg_log_like, x, p, B, n, h, constraint):
+def _leapfrog_base(log_like, x, p, B, n, h, constraint):
     # we use the usual way the KDK loops
     # are unrolled
     # for four iterations we have
@@ -19,32 +19,25 @@ def _leapfrog_base(neg_log_like, x, p, B, n, h, constraint):
     # so we get a single half kick, 4-1 = 3 full
     # drifts+kicks, then a full drift + halkf kick
 
-    gfunc = jax.grad(neg_log_like)
-    vgfunc = jax.value_and_grad(neg_log_like)
+    gfunc = jax.grad(log_like)
+    vgfunc = jax.value_and_grad(log_like)
     gcfunc = jax.grad(constraint)
 
     def _reflect(_x, _p):
-        # if not use_pinv:
         n = jnp.dot(B.T, gcfunc(_x))
         n = n / jnp.sqrt(jnp.sum(n * n))
         _p = _p - 2.0 * jnp.dot(_p, n) * n
-        # else:
-        # bp = jnp.dot(B, _p)
-        # n = gcfunc(_x)
-        # n = n / jnp.sqrt(jnp.sum(n * n))
-        # bp = bp - 2.0 * jnp.dot(bp, n) * n
-        # _p = jnp.dot(pB, bp)
 
         return _x, _p
 
     def _kick(_x, _p):
         g = gfunc(_x)
-        _p = _p - h * jnp.dot(B.T, g)
+        _p = _p - h * jnp.dot(B.T, -g)
         return _x, _p
 
     # first half kick
-    vi, g = vgfunc(x)
-    p = p - h / 2.0 * jnp.dot(B.T, g)
+    nvi, g = vgfunc(x)
+    p = p - h / 2.0 * jnp.dot(B.T, -g)
 
     # n - 1 full drft + kick
     for _ in range(n - 1):
@@ -60,8 +53,8 @@ def _leapfrog_base(neg_log_like, x, p, B, n, h, constraint):
 
     # full drift, half kick
     x = x + h * jnp.dot(B, p)
-    vf, g = vgfunc(x)
-    p = p - h / 2 * jnp.dot(B.T, g)
+    nvf, g = vgfunc(x)
+    p = p - h / 2 * jnp.dot(B.T, -g)
 
     # reverse p
     p = -p
@@ -69,21 +62,21 @@ def _leapfrog_base(neg_log_like, x, p, B, n, h, constraint):
     has_nans_or_bad_constr = (
         jnp.any(jnp.isnan(p))
         | jnp.any(jnp.isnan(p))
-        | jnp.any(jnp.isnan(vi))
-        | jnp.any(jnp.isnan(vf))
+        | jnp.any(jnp.isnan(nvi))
+        | jnp.any(jnp.isnan(nvf))
         | jnp.any(jnp.isnan(x))
         | jnp.any(constraint(x) < 0)
     )
-    vf, p, x = jax.lax.cond(
+    nvf, p, x = jax.lax.cond(
         has_nans_or_bad_constr,
-        lambda _vf, _p, _x: (jnp.inf, jnp.zeros_like(_p), jnp.zeros_like(_x)),
-        lambda _vf, _p, _x: (_vf, _p, _x),
-        vf,
+        lambda _nvf, _p, _x: (-jnp.inf, jnp.zeros_like(_p), jnp.zeros_like(_x)),
+        lambda _nvf, _p, _x: (_nvf, _p, _x),
+        nvf,
         p,
         x,
     )
 
-    return x, p, vi, vf
+    return x, p, nvi, nvf
 
 
 _leapfrog = jax.jit(
@@ -101,7 +94,7 @@ _leapfrog = jax.jit(
     static_argnums=(0, 1, 2, 3, 4, 5),
 )
 def _walk_step(
-    neg_log_like,
+    log_like,
     n_steps,
     h,
     n_walkers_2,
@@ -119,7 +112,7 @@ def _walk_step(
 
     x_new = []
     acc_new = []
-    nll_new = []
+    ll_new = []
 
     for s in range(2):
         # draw p
@@ -140,11 +133,14 @@ def _walk_step(
         B = B.T
 
         # do _leapfrog
-        x_pr, p_pr, v, v_pr = _leapfrog(neg_log_like, x, p, B, n_steps, h, constraint)
+        x_pr, p_pr, nv, nv_pr = _leapfrog(log_like, x, p, B, n_steps, h, constraint)
 
         # measure q = exp(-V(xn) - 0.5 * pn * pn + V(x) + 0.5 * p *p)
         logq = (
-            v + 0.5 * jnp.sum(p * p, axis=1) - v_pr - 0.5 * jnp.sum(p_pr * p_pr, axis=1)
+            -nv
+            + 0.5 * jnp.sum(p * p, axis=1)
+            + nv_pr
+            - 0.5 * jnp.sum(p_pr * p_pr, axis=1)
         )
         q = jnp.exp(logq)
         q = jnp.clip(q, min=0, max=1)
@@ -157,20 +153,20 @@ def _walk_step(
         acc_val = r <= q
         x_new.append(jnp.where(acc_val.reshape(n_walkers_2, 1), x_pr, x))
         acc_new.append(q)
-        nll_new.append(jnp.where(acc_val, v_pr, v))
+        ll_new.append(jnp.where(acc_val, nv_pr, nv))
 
     x_new = jnp.concatenate(x_new)
     acc_new = jnp.concatenate(acc_new)
-    nll_new = jnp.concatenate(nll_new)
+    ll_new = jnp.concatenate(ll_new)
 
     return (
         x_new,
         rng_key,
-    ), (x_new, acc_new, nll_new)
+    ), (x_new, acc_new, ll_new)
 
 
 def _ensemble_hmc_with_constraint(
-    neg_log_like,
+    log_like,
     x_init,
     n_samples,
     n_dims,
@@ -189,7 +185,7 @@ def _ensemble_hmc_with_constraint(
 
     _local_walk_step = functools.partial(
         _walk_step,
-        neg_log_like,
+        log_like,
         n_steps,
         h,
         n_walkers_2,
@@ -201,9 +197,9 @@ def _ensemble_hmc_with_constraint(
             n_samples, tqdm_type="std", ncols=80, desc="sampling"
         )(_local_walk_step)
 
-    _, (chain, acc, nloglike) = jax.lax.scan(
+    _, (chain, acc, loglike) = jax.lax.scan(
         _local_walk_step, (x_init, rng_key), xs=jnp.arange(n_samples)
     )
     if verbose:
         print("acceptance rate: %0.2f%%" % (100.0 * acc.mean()))
-    return chain, acc, nloglike
+    return chain, acc, loglike
