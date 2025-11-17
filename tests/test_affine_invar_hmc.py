@@ -55,3 +55,52 @@ def test_ensemble_hmc_smoke(n_dims):
         rtol=1e-6,
         atol=0,
     )
+
+
+@pytest.mark.parametrize("n_dims", [2, 10])
+def test_ensemble_hmc_raises(n_dims):
+    with pytest.raises(AssertionError) as e:
+        ensemble_hmc(
+            jrng.key(10),
+            None,
+            n_dims=n_dims,
+            n_samples=10000,
+            n_walkers=1,
+            verbose=False,
+        )
+        assert "must be even" in str(e.value)
+
+    with pytest.raises(AssertionError) as e:
+        ensemble_hmc(
+            jrng.key(10),
+            None,
+            n_dims=n_dims,
+            n_samples=10000,
+            n_walkers=2,
+            verbose=False,
+        )
+        assert "least `2 * n_dims` walkers" in str(e.value)
+
+    with pytest.raises(AssertionError) as e:
+        ensemble_hmc(
+            jrng.key(10),
+            None,
+            n_dims=n_dims,
+            n_samples=10000,
+            n_walkers=2 * n_dims,
+            params_init=jnp.arange(n_dims * 2).reshape(2, n_dims),
+            verbose=False,
+        )
+        assert "`n_walkers` must match the number of" in str(e.value)
+
+    with pytest.raises(AssertionError) as e:
+        ensemble_hmc(
+            jrng.key(10),
+            None,
+            n_dims=n_dims,
+            n_samples=10000,
+            n_walkers=2 * n_dims,
+            params_init=jnp.arange(n_dims * n_dims * 4).reshape(2 * n_dims, 2 * n_dims),
+            verbose=False,
+        )
+        assert "given by `n_dims` must match the number of" in str(e.value)
