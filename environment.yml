@@ -3,8 +3,10 @@ channels:
   - conda-forge
 dependencies:
   - jax>=0.5.0
-  - numpy
   - jax-tqdm
+  - numpy
+  - scipy
+  - tqdm
   - pip
   - setuptools
   - setuptools_scm>=8

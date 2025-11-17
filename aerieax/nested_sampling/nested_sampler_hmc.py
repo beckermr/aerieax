@@ -7,7 +7,7 @@ import jax.numpy
 import jax.numpy as jnp
 import jax.scipy as jsp
 import jax.random as jrng
-
+import numpy as np
 
 from .affine_invar_constr_hmc import _ensemble_hmc_with_constraint
 
@@ -252,12 +252,12 @@ def nested_sampler_hmc(
     prior_draw,
     n_dims,
     n_live,
-    n_iter_max,
-    n_iter_conv_fac,
-    n_walkers_hmc,
-    n_samples_hmc,
-    leapfrog_step_size_hmc,
-    n_leapfrog_steps_hmc,
+    n_iter_max=None,
+    n_iter_conv_fac=10,
+    n_walkers_hmc=None,
+    n_samples_hmc=10,
+    leapfrog_step_size_hmc=None,
+    n_leapfrog_steps_hmc=None,
     n_conv_check=10,
 ):
     """Run nested sampling.
@@ -279,19 +279,21 @@ def nested_sampler_hmc(
         The number of dimensions.
     n_live : int
         The number of live points.
-    n_iter_max : int
-        The maximum number of iterations.
-    n_iter_conv_fac : float
+    n_iter_max : int, optional
+        The maximum number of iterations. Default is `10 * n_live`.
+    n_iter_conv_fac : float, optional
         The convergence factor defined so that convergence happens when
-        `n_iter > n_iter_conv_fac * n_iter * H`. A typical value is 2.
-    n_walkers_hmc : int
-        The number of walkers to use for HMC.
-    n_samples_hmc : int
-        The number of samples to produce when drawing the new live point.
-    leapfrog_step_size_hmc : float
-        The step size for the leapfrog integration.
+        `n_iter > n_iter_conv_fac * n_iter * H`. Default is 10.
+    n_walkers_hmc : int, optional
+        The number of walkers to use for HMC. Default is `max(2 * n_dims, 10)`.
+    n_samples_hmc : int, optional
+        The number of samples to produce when drawing the new live point. Default
+        is 10.
+    leapfrog_step_size_hmc : float, optional
+        The step size for the leapfrog integration. Default is
+        `0.1 * (n_dims)**(-0.25)`.
     n_leapfrog_steps_hmc : int
-        The number of leapfrog steps to take.
+        The number of leapfrog steps to take. Default is `int(1/leapfrog_step_size)`.
     n_conv_check : int, optional
         How often to check convergence. Default is every 10 iterations.
 
@@ -314,8 +316,20 @@ def nested_sampler_hmc(
         sampler when it terminates.
     """
 
-    assert n_walkers_hmc <= n_live or n_walkers_hmc >= 2 * n_dims, (
-        "The parameter `n_walkers_hmc must satisfy "
+    if n_iter_max is None:
+        n_iter_max = 10 * n_live
+
+    if n_walkers_hmc is None:
+        n_walkers_hmc = max(2 * n_dims, 10)
+
+    if leapfrog_step_size_hmc is None:
+        leapfrog_step_size_hmc = 0.1 * np.power(n_dims, -0.25)
+
+    if n_leapfrog_steps_hmc is None:
+        n_leapfrog_steps_hmc = int(1 / leapfrog_step_size_hmc)
+
+    assert n_walkers_hmc <= n_live and n_walkers_hmc >= 2 * n_dims, (
+        "The parameter `n_walkers_hmc` must satisfy "
         "`2 * n_dims <= n_walkers_hmc <= n_live`! "
         f"You sent n_walkers_hmc={n_walkers_hmc}, n_dims={n_dims}, n_live={n_live}."
     )

@@ -16,8 +16,10 @@ license = {file = "LICENSE"}
 readme = "README.md"
 dependencies = [
   "jax>=0.5.0",
-  "numpy",
   "jax-tqdm",
+  "numpy",
+  "scipy",
+  "tqdm",
 ]
 
 [project.urls]
